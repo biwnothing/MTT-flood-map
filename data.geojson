@@ -1,0 +1,22 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "road_name": "ถนนเมืองเอก (หน้า ม.รังสิต)",
+        "water_depth": "25 ซม.",
+        "status": "รถเล็กไม่ควรผ่าน",
+        "color": "#FF8C00",
+        "updated": "27 ก.ย. 2026 - 15:00 น."
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [100.5880, 13.9650],
+          [100.5900, 13.9660]
+        ]
+      }
+    }
+  ]
+}
