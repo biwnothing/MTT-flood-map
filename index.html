@@ -2,14 +2,16 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ระบบรายงานน้ำท่วมขังบนผิวจราจร</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ระบบรายงานน้ำท่วมขังบนผิวจราจร - เมืองทองธานี</title>
   
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
+    /* ล็อค body ไม่ให้เลื่อนหน้าจอได้ */
+    body { overflow: hidden; touch-action: none; }
     #map { width: 100vw; height: 100vh; }
     .legend {
       position: absolute;
@@ -30,31 +32,56 @@
 
   <div class="legend">
     <div style="font-weight: bold; margin-bottom: 8px;">ระดับน้ำท่วมผิวจราจร</div>
-    <div class="legend-item"><span class="color-box" style="background: #FFD700;"></span> 10–20 ซม. (รถเล็กระวัง)</div>
-    <div class="legend-item"><span class="color-box" style="background: #FF8C00;"></span> 20–30 ซม. (รถเล็กห้ามผ่าน)</div>
-    <div class="legend-item"><span class="color-box" style="background: #DC143C;"></span> > 30 ซม. (ปิดการจราจร)</div>
+    <div class="legend-item"><span class="color-box" style="background: #28A745;"></span> < 10 ซม. (ปกติ)</div>
+    <div class="legend-item"><span class="color-box" style="background: #FFD700;"></span> 10–20 ซม. (ระวัง)</div>
+    <div class="legend-item"><span class="color-box" style="background: #FF8C00;"></span> 20–30 ซม. (เลี่ยงเส้นทาง)</div>
+    <div class="legend-item"><span class="color-box" style="background: #DC143C;"></span> > 30 ซม. (ปิดจราจร)</div>
   </div>
 
   <div id="map"></div>
 
   <script>
-    // 1. กำหนดพิกัดเริ่มต้น และ Zoom Level
-    const map = L.map('map').setView([13.9100, 100.5480], 14);
+    // 1. ตั้งค่าปิดการควบคุมแผนที่ทุกชนิด (ล็อคแผนที่)
+    const map = L.map('map', {
+      zoomControl: false,       // ซ่อนปุ่มซูม +/-
+      dragging: false,          // ห้ามลากแผนที่
+      touchZoom: false,         // ห้ามซูมด้วยนิ้ว (Pinch to zoom)
+      doubleClickZoom: false,   // ห้ามดับเบิลคลิกเพื่อซูม
+      scrollWheelZoom: false,   // ห้ามซูมด้วยลูกกลิ้งเมาส์
+      boxZoom: false,           // ห้ามซูมด้วยการลากกล่อง
+      keyboard: false           // ห้ามเลื่อนแผนที่ด้วยคีย์บอร์ด
+    });
 
-    // 2. ใช้แผนที่ฐานจาก OpenStreetMap
+    // 2. กำหนดกรอบพื้นที่ (Bounding Box) ของเมืองทองธานี
+    // พิกัด: [มุมล่างซ้าย (SouthWest), มุมบนขวา (NorthEast)]
+    const muangThongBounds = [
+      [13.8950, 100.5280], // ล่างซ้าย: แถวทางเข้าฝั่งแจ้งวัฒนะ/ติวานนท์
+      [13.9220, 100.5550]  // บนขวา: แถวริมทะเลสาบ/ทางด่วน
+    ];
+
+    // บังคับให้แผนที่แสดงผลพอดีกับกรอบพื้นที่นี้เสมอ
+    map.fitBounds(muangThongBounds);
+    
+    // ตั้งข้อจำกัดไม่ให้แผนที่หลุดออกนอกกรอบนี้
+    map.setMaxBounds(muangThongBounds);
+
+    // 3. ปรับขนาดแผนที่อัตโนมัติเมื่อหมุนจอโทรศัพท์ หรือย่อขยายหน้าต่างเบราว์เซอร์
+    window.addEventListener('resize', () => {
+      map.fitBounds(muangThongBounds);
+    });
+
+    // 4. แผนที่ฐานจาก OpenStreetMap
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    // 3. ฟังก์ชันดึงข้อมูลจากไฟล์ data.geojson แบบป้องกันการติด Cache
+    // 5. ดึงข้อมูล GeoJSON
     async function loadFloodData() {
       try {
-        // เพิ่ม ?t=เวลาปัจจุบัน เพื่อบังคับให้ Browser โหลดไฟล์ใหม่เสมอ ไม่ดึงของเก่าจาก Cache
         const response = await fetch(`data.geojson?t=${new Date().getTime()}`);
         const data = await response.json();
 
-        // 4. วาดเส้นลงบนแผนที่
         L.geoJSON(data, {
           style: function(feature) {
             return {
@@ -74,7 +101,8 @@
                   <small style="color: #666;">อัปเดต: ${p.updated}</small>
                 </div>
               `;
-              layer.bindPopup(popupContent);
+              // ตั้งค่า autoPan: false เพื่อไม่ให้แผนที่พยายามขยับตามเวลาผู้ใช้คลิก Pop-up
+              layer.bindPopup(popupContent, { autoPan: false });
             }
           }
         }).addTo(map);
@@ -83,7 +111,6 @@
       }
     }
 
-    // เรียกใช้งานฟังก์ชัน
     loadFloodData();
   </script>
 </body>
