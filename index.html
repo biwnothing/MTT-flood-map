@@ -5,12 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>ระบบรายงานน้ำท่วมขังบนผิวจราจร - เมืองทองธานี</title>
   
-  <!-- โหลด Leaflet แผนที่ -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  
-  <!-- โหลด PapaParse (ตัวจบปัญหาเว้นบรรทัดและช่องว่างใน Excel) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
@@ -44,91 +40,75 @@
   <div id="map"></div>
 
   <script>
+    // 1. สร้างแผนที่: เปิดระบบเลื่อนและซูม แต่ดักระดับการซูมไว้
     const map = L.map('map', {
-      zoomControl: false, dragging: false, touchZoom: false,
-      doubleClickZoom: false, scrollWheelZoom: false, boxZoom: false, keyboard: false
+      zoomControl: true,       // เปิดปุ่ม +/-
+      dragging: true,          // เปิดการเลื่อนแผนที่ (Pan)
+      touchZoom: true,         // เปิดใช้นิ้วถ่างซูม
+      scrollWheelZoom: true,   // เปิดลูกกลิ้งเมาส์ซูม
+      doubleClickZoom: true,   // เปิดดับเบิลคลิกซูม
+      minZoom: 14,             // ล็อคการซูมออก (ไม่ให้เห็นนอกพื้นที่)
+      maxZoom: 19              // ล็อคการซูมเข้าสูงสุด
     });
 
+    // 2. กำหนดกรอบเมืองทองธานี (ติวานนท์ - แจ้งวัฒนะ - คลองประปา)
     const muangThongBounds = [
       [13.8880, 100.5100], 
-      [13.9350, 100.5650]  
+      [13.9350, 100.5650]
     ];
-    map.fitBounds(muangThongBounds);
+
+    // 3. ขึงขอบเขตไม่ให้เลื่อนหนีออกไปที่อื่น
     map.setMaxBounds(muangThongBounds);
+    
+    // 4. ตั้งค่าความแข็งของขอบแผนที่ (1.0 = ชนขอบแล้วหยุดสนิท ไม่เด้งดึ๋งออกไป)
+    map.options.maxBoundsViscosity = 1.0;
 
-    window.addEventListener('resize', () => { map.fitBounds(muangThongBounds); });
+    // สั่งให้ตอนเปิดมาครั้งแรก ซูมพอดีกับกรอบเมืองทอง
+    map.fitBounds(muangThongBounds);
 
+    // ปรับจออัตโนมัติเวลาหมุนโทรศัพท์
+    window.addEventListener('resize', () => { 
+      map.fitBounds(muangThongBounds); 
+    });
+
+    // โหลดแผนที่ฐาน (ฟรี 100%)
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    function loadFloodData() {
-      // 1. เอา URL แบบ CSV มาใส่ตรงนี้
-      const sheetURL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQqm25n5JLGcuK1GkChGuKqjPErKzSpb6E57lnfqVouKxklBa3eda94Hrw5J9VK0p9137H-02ZqN8DZ/pub?gid=0&single=true&output=csv';
-      
-      // 2. ใช้ PapaParse อ่านไฟล์
-      Papa.parse(sheetURL + "&t=" + new Date().getTime(), {
-        download: true,
-        header: false, // ไม่อิงชื่อคอลัมน์
-        skipEmptyLines: true,
-        complete: function(results) {
-          const data = results.data;
-          const features = [];
+    // ดึงข้อมูล GeoJSON
+    async function loadFloodData() {
+      try {
+        const response = await fetch(`data.geojson?t=${new Date().getTime()}`);
+        const data = await response.json();
 
-          // เริ่มบรรทัดที่ 2 (index 1) เพื่อข้ามหัวตาราง
-          for (let i = 1; i < data.length; i++) {
-            const cols = data[i];
-            if (cols.length < 4) continue;
-
-            const location = cols[0] ? cols[0].trim() : "";
-            const description = cols[1] ? cols[1].trim() : "";
-            const color = cols[2] ? cols[2].trim() : "";
-            const coordsString = cols[3] ? cols[3].trim() : "";
-
-            // ถ้าช่องไหนว่างให้ข้ามไปเงียบๆ
-            if (!location || !description || !color || !coordsString) continue;
-
-            try {
-              // PapaParse จัดการเรื่องเว้นบรรทัดให้แล้ว JSON.parse เลยจะทำงานได้ 100%
-              const coords = JSON.parse(coordsString);
-              features.push({
-                "type": "Feature",
-                "properties": { "location": location, "description": description, "color": color },
-                "geometry": { "type": "LineString", "coordinates": coords }
-              });
-            } catch (e) {
-              continue;
+        L.geoJSON(data, {
+          style: function(feature) {
+            return {
+              color: feature.properties.color,
+              weight: 6,
+              opacity: 0.85
+            };
+          },
+          onEachFeature: function(feature, layer) {
+            if (feature.properties) {
+              const p = feature.properties;
+              const popupContent = `
+                <div style="font-size: 13px; line-height: 1.5;">
+                  <b style="font-size: 14px;">${p.road_name}</b><br>
+                  <b>ระดับน้ำ:</b> ${p.water_depth}<br>
+                  <b>สถานะ:</b> <span style="color:${p.color}; font-weight:bold;">${p.status}</span><br>
+                  <small style="color: #666;">อัปเดต: ${p.updated}</small>
+                </div>
+              `;
+              layer.bindPopup(popupContent, { autoPan: false });
             }
           }
-
-          const geoJsonData = {
-            "type": "FeatureCollection",
-            "features": features
-          };
-
-          L.geoJSON(geoJsonData, {
-            style: function(feature) {
-              return { color: feature.properties.color, weight: 6, opacity: 0.85 };
-            },
-            onEachFeature: function(feature, layer) {
-              if (feature.properties) {
-                const p = feature.properties;
-                const popupContent = `
-                  <div style="font-size: 13px; line-height: 1.5;">
-                    <b style="font-size: 14px;">${p.location}</b><br>
-                    <b>สถานะ:</b> <span style="color:${p.color}; font-weight:bold;">${p.description}</span>
-                  </div>
-                `;
-                layer.bindPopup(popupContent, { autoPan: false });
-              }
-            }
-          }).addTo(map);
-        },
-        error: function(err) {
-          console.error("เกิดข้อผิดพลาดในการโหลดข้อมูล CSV:", err);
-        }
-      });
+        }).addTo(map);
+      } catch (error) {
+        console.error("เกิดข้อผิดพลาดในการโหลดไฟล์ GeoJSON:", error);
+      }
     }
 
     loadFloodData();
