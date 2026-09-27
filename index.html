@@ -10,7 +10,6 @@
 
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
-    /* ล็อค body ไม่ให้เลื่อนหน้าจอได้ */
     body { overflow: hidden; touch-action: none; }
     #map { width: 100vw; height: 100vh; }
     .legend {
@@ -41,48 +40,61 @@
   <div id="map"></div>
 
   <script>
-    // 1. ตั้งค่าปิดการควบคุมแผนที่ทุกชนิด (ล็อคแผนที่)
+    // 1. ล็อคแผนที่ ไม่ให้เลื่อนหรือซูมหนีออกไปที่อื่น
     const map = L.map('map', {
-      zoomControl: false,       // ซ่อนปุ่มซูม +/-
-      dragging: false,          // ห้ามลากแผนที่
-      touchZoom: false,         // ห้ามซูมด้วยนิ้ว (Pinch to zoom)
-      doubleClickZoom: false,   // ห้ามดับเบิลคลิกเพื่อซูม
-      scrollWheelZoom: false,   // ห้ามซูมด้วยลูกกลิ้งเมาส์
-      boxZoom: false,           // ห้ามซูมด้วยการลากกล่อง
-      keyboard: false           // ห้ามเลื่อนแผนที่ด้วยคีย์บอร์ด
+      zoomControl: false, dragging: false, touchZoom: false,
+      doubleClickZoom: false, scrollWheelZoom: false, boxZoom: false, keyboard: false
     });
 
-    // 2. กำหนดกรอบพื้นที่ (Bounding Box) ของเมืองทองธานี
-    // พิกัด: [มุมล่างซ้าย (SouthWest), มุมบนขวา (NorthEast)]
+    // 2. กำหนดกรอบพื้นที่ใหม่ (ครอบคลุม ติวานนท์ - แจ้งวัฒนะ - คลองประปา)
     const muangThongBounds = [
-      [13.8950, 100.5280], // ล่างซ้าย: แถวทางเข้าฝั่งแจ้งวัฒนะ/ติวานนท์
-      [13.9220, 100.5550]  // บนขวา: แถวริมทะเลสาบ/ทางด่วน
+      [13.8880, 100.5100], // มุมล่างซ้าย: คลุมแยกปากเกร็ด / ถนนติวานนท์ตัดแจ้งวัฒนะ
+      [13.9350, 100.5650]  // มุมบนขวา: คลุมแนวคลองประปา / แยกศรีสมาน
     ];
-
-    // บังคับให้แผนที่แสดงผลพอดีกับกรอบพื้นที่นี้เสมอ
-    map.fitBounds(muangThongBounds);
     
-    // ตั้งข้อจำกัดไม่ให้แผนที่หลุดออกนอกกรอบนี้
+    // บังคับแผนที่ให้อยู่ในกรอบเสมอ
+    map.fitBounds(muangThongBounds);
     map.setMaxBounds(muangThongBounds);
 
-    // 3. ปรับขนาดแผนที่อัตโนมัติเมื่อหมุนจอโทรศัพท์ หรือย่อขยายหน้าต่างเบราว์เซอร์
+    // ปรับสัดส่วนอัตโนมัติเมื่อหมุนหน้าจอโทรศัพท์
     window.addEventListener('resize', () => {
       map.fitBounds(muangThongBounds);
     });
 
-    // 4. แผนที่ฐานจาก OpenStreetMap
+    // 3. เรียกแผนที่ฐานจาก OpenStreetMap (ฟรี)
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    // 5. ดึงข้อมูล GeoJSON
+    // 4. ดึงข้อมูลจาก API (Google Sheets)
     async function loadFloodData() {
       try {
-        const response = await fetch(`data.geojson?t=${new Date().getTime()}`);
-        const data = await response.json();
+        // นำ URL ที่ได้จากการ Deploy Web App ใน Google Apps Script มาใส่ในเครื่องหมายคำพูดด้านล่าง
+        const sheetURL = 'https://script.google.com/macros/s/AKfycbyDd-ND7hZU9NIOLKg1xLJhsvkr9O0FIYw-u9hiRkhg2eUy_2cVH6rapCygHgmNo0Pmaw/exec';
+        
+        const response = await fetch(sheetURL);
+        const simpleData = await response.json();
 
-        L.geoJSON(data, {
+        // แปลงข้อมูลที่ได้จาก Sheets เป็น GeoJSON
+        const geoJsonData = {
+          "type": "FeatureCollection",
+          "features": simpleData.map(item => ({
+            "type": "Feature",
+            "properties": {
+              "location": item.location,
+              "description": item.description,
+              "color": item.color
+            },
+            "geometry": {
+              "type": "LineString",
+              "coordinates": item.coords
+            }
+          }))
+        };
+
+        // 5. วาดเส้นและตั้งค่า Pop-up
+        L.geoJSON(geoJsonData, {
           style: function(feature) {
             return {
               color: feature.properties.color,
@@ -93,15 +105,14 @@
           onEachFeature: function(feature, layer) {
             if (feature.properties) {
               const p = feature.properties;
+              
               const popupContent = `
                 <div style="font-size: 13px; line-height: 1.5;">
-                  <b style="font-size: 14px;">${p.road_name}</b><br>
-                  <b>ระดับน้ำ:</b> ${p.water_depth}<br>
-                  <b>สถานะ:</b> <span style="color:${p.color}; font-weight:bold;">${p.status}</span><br>
-                  <small style="color: #666;">อัปเดต: ${p.updated}</small>
+                  <b style="font-size: 14px;">${p.location}</b><br>
+                  <b>สถานะ:</b> <span style="color:${p.color}; font-weight:bold;">${p.description}</span><br>
+                  <small style="color: #666;">ข้อมูลอัปเดตล่าสุด</small>
                 </div>
               `;
-              // ตั้งค่า autoPan: false เพื่อไม่ให้แผนที่พยายามขยับตามเวลาผู้ใช้คลิก Pop-up
               layer.bindPopup(popupContent, { autoPan: false });
             }
           }
@@ -111,6 +122,7 @@
       }
     }
 
+    // เรียกฟังก์ชันเริ่มทำงาน
     loadFloodData();
   </script>
 </body>
